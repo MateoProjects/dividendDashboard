@@ -1,24 +1,13 @@
-// 🌐 Yahoo Finance API Integration via Vercel Serverless Function
-// Uses yahoo-finance2 library which handles Yahoo authentication
-// Deploy to Vercel (100% FREE)
+// 🌐 Google Sheets CSV Integration
+// Fetches data directly from public Google Sheets CSV export
+// No API keys, no CORS issues, 100% free!
 
-// Vercel API endpoint
-// For local development: http://localhost:3000/api/stocks
-// For production: https://dividend-dashboard-psi.vercel.app/api/stocks
-const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:3000/api/stocks'
-  : 'https://dividend-dashboard-psi.vercel.app/api/stocks';
+// Google Sheets CSV export URL
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/1CbvYPrHJnY73xLZU-ZNsnU5QNY_cy9kCKL1Cy3smA1k/export?format=csv&gid=988489794';
 
 // Cache configuration
-const CACHE_KEY = 'yahoo_stock_cache';
+const CACHE_KEY = 'stocks_csv_cache';
 const CACHE_DURATION = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
-
-/**
- * Check if API is configured
- */
-function isApiConfigured() {
-  return API_URL && API_URL.length > 0;
-}
 
 /**
  * Get cached data if valid
@@ -97,45 +86,50 @@ export function clearCache() {
 }
 
 /**
- * Fetch data via Vercel API
- * @param {string[]} symbols - Array of stock symbols
- * @returns {Promise<Object>} Response data
+ * Parse CSV text to array of objects
+ * @param {string} csv - CSV text
+ * @returns {Object[]} Parsed data
  */
-async function fetchViaApi(symbols) {
-  if (!isApiConfigured()) {
-    throw new Error(
-      '❌ API not configured!\n\n' +
-      'Please deploy to Vercel first (see VERCEL_SETUP.md)'
-    );
-  }
+function parseCSV(csv) {
+  const lines = csv.trim().split('\n').filter(line => line.trim());
 
-  const symbolsParam = symbols.join(',');
-  const apiUrl = `${API_URL}?symbols=${encodeURIComponent(symbolsParam)}`;
-
-  console.log(`🔄 Fetching via Vercel API...`);
-
-  const response = await fetch(apiUrl, {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/json',
+  // Try to find the header row (should have "Ticker" or multiple columns)
+  let headerIndex = 0;
+  for (let i = 0; i < Math.min(5, lines.length); i++) {
+    const cols = lines[i].split(',');
+    if (cols.length > 3) { // Header should have multiple columns
+      headerIndex = i;
+      break;
     }
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`API request failed! status: ${response.status}, ${errorData.message || ''}`);
   }
 
-  return await response.json();
+  const headers = lines[headerIndex].split(',').map(h => h.trim().replace(/"/g, ''));
+  console.log('📋 CSV Headers:', headers);
+
+  const data = [];
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+
+    // Skip empty rows
+    if (values.filter(v => v).length === 0) continue;
+
+    const obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = values[index] || '';
+    });
+
+    data.push(obj);
+  }
+
+  return data;
 }
 
 /**
- * Fetch stock quote data from Yahoo Finance via Vercel API
- * @param {string[]} tickers - Array of stock tickers
+ * Fetch and parse CSV from Google Sheets
  * @param {boolean} forceRefresh - Force refresh even if cache is valid
  * @returns {Promise<Object[]>} Array of stock data
  */
-export async function fetchStockQuotes(tickers, forceRefresh = false) {
+export async function fetchStocksBatched(tickers = [], batchSize = 50, retries = 3, forceRefresh = false) {
   // Check cache first (unless force refresh)
   if (!forceRefresh) {
     const cached = getCachedData();
@@ -145,125 +139,75 @@ export async function fetchStockQuotes(tickers, forceRefresh = false) {
   }
 
   try {
-    console.log(`🔄 Fetching ${tickers.length} stocks from Yahoo Finance...`);
+    console.log('🔄 Fetching data from Google Sheets CSV...');
 
-    const data = await fetchViaApi(tickers);
+    const response = await fetch(CSV_URL);
 
-    if (!data.quoteResponse || !data.quoteResponse.result) {
-      throw new Error('Invalid response format from Yahoo Finance');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV: ${response.status}`);
     }
 
-    console.log(`✅ Successfully fetched ${data.quoteResponse.result.length} stocks`);
+    const csvText = await response.text();
+    const parsedData = parseCSV(csvText);
 
-    // Map Yahoo Finance data to our format
-    const mappedData = data.quoteResponse.result.map(stock => ({
-      ticker: stock.symbol || '',
-      name: stock.longName || stock.shortName || stock.symbol || '',
-      price: stock.regularMarketPrice || 0,
-      currency: stock.currency || 'USD',
-      dividend: stock.trailingAnnualDividendRate || 0,
-      dividendYield: stock.trailingAnnualDividendYield || 0,
-      sector: stock.sector || 'Unknown',
-      industry: stock.industry || 'Unknown',
-      marketCap: stock.marketCap || 0,
-      exDividendDate: stock.exDividendDate ? new Date(stock.exDividendDate * 1000) : null,
-      dividendDate: stock.dividendDate ? new Date(stock.dividendDate * 1000) : null,
-      change: stock.regularMarketChange || 0,
-      changePercent: stock.regularMarketChangePercent || 0
+    console.log(`✅ Successfully fetched ${parsedData.length} stocks from CSV`);
+    console.log('📋 First row sample:', parsedData[0]); // Debug: see what we got
+
+    // Map CSV data to our format
+    // CSV columns: Name,Ticker,Price,Dividend Payment,Dividend Yield,Sector
+    const mappedData = parsedData.map(row => ({
+      ticker: row.Ticker || '',
+      name: row.Name || row.Ticker || '',
+      price: parseFloat(row.Price || 0),
+      currency: 'USD',
+      dividend: parseFloat(row['Dividend Payment'] || 0),
+      dividendYield: parseFloat(row['Dividend Yield'] || 0) / 100, // Convert percentage to decimal
+      sector: row.Sector || 'Unknown',
+      industry: row.Sector || 'Unknown', // Use Sector as Industry since CSV doesn't have Industry
+      marketCap: 0, // Not available in CSV
+      exDividendDate: null, // Not available in CSV
+      dividendDate: null,
+      change: 0, // Not available in CSV
+      changePercent: 0 // Not available in CSV
     }));
 
-    // Cache the results
-    setCachedData(mappedData);
+    // Filter out invalid entries (must have ticker and price)
+    // Also filter out sector summary rows that appear at the end
+    const validData = mappedData.filter(stock =>
+      stock.ticker &&
+      stock.ticker.length > 0 &&
+      stock.price > 0 &&
+      !stock.name.includes('Sector') // Filter out summary rows
+    );
 
-    return mappedData;
+    console.log(`✅ Mapped to ${validData.length} valid stocks`);
+    console.log('📊 Sample mapped data:', validData[0]); // Debug: see mapped result
+
+    // Cache the results
+    setCachedData(validData);
+
+    return validData;
 
   } catch (error) {
-    console.error('❌ Failed to fetch stock quotes:', error.message);
+    console.error('❌ Failed to fetch CSV data:', error.message);
     throw error;
   }
 }
 
 /**
- * Fetch historical dividend data
- * Note: Not implemented yet for Vercel API
- * @param {string} ticker - Stock ticker
- * @returns {Promise<Object[]>} Array of dividend history
+ * Fetch stock quotes (alias for fetchStocksBatched for compatibility)
  */
-export async function fetchDividendHistory(ticker) {
-  console.warn('Dividend history not yet implemented for Vercel API');
-  return [];
+export async function fetchStockQuotes(tickers, forceRefresh = false) {
+  return fetchStocksBatched(tickers, 50, 3, forceRefresh);
 }
 
 /**
- * Batch fetch with retry logic and caching
- * @param {string[]} tickers - Array of stock tickers
- * @param {number} batchSize - Size of each batch
- * @param {number} retries - Number of retries on failure
- * @param {boolean} forceRefresh - Force refresh even if cache is valid
- * @returns {Promise<Object[]>} Combined stock data
+ * Fetch historical dividend data
+ * Note: Not available from CSV, returns empty array
  */
-export async function fetchStocksBatched(tickers, batchSize = 50, retries = 3, forceRefresh = false) {
-  // Check cache first (unless force refresh)
-  if (!forceRefresh) {
-    const cached = getCachedData();
-    if (cached) {
-      return cached.data;
-    }
-  }
-
-  if (!isApiConfigured()) {
-    throw new Error('API not configured. Please deploy to Vercel first.');
-  }
-
-  const batches = [];
-
-  // Split tickers into batches
-  for (let i = 0; i < tickers.length; i += batchSize) {
-    batches.push(tickers.slice(i, i + batchSize));
-  }
-
-  console.log(`📦 Processing ${tickers.length} stocks in ${batches.length} batches...`);
-
-  const results = [];
-
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    let attempts = 0;
-    let success = false;
-
-    while (attempts < retries && !success) {
-      try {
-        console.log(`📊 Batch ${i + 1}/${batches.length}: Fetching ${batch.length} stocks...`);
-        // Force refresh for internal batches to avoid cache issues
-        const data = await fetchStockQuotes(batch, true);
-        results.push(...data);
-        success = true;
-
-        // Small delay between batches to be nice to Yahoo
-        if (i < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      } catch (error) {
-        attempts++;
-        if (attempts < retries) {
-          console.warn(`⚠️ Batch ${i + 1} attempt ${attempts} failed, retrying...`);
-          // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
-        } else {
-          console.error(`❌ Failed to fetch batch ${i + 1} after ${retries} attempts:`, batch);
-        }
-      }
-    }
-  }
-
-  console.log(`✅ Successfully fetched ${results.length}/${tickers.length} stocks`);
-
-  // Cache the complete results
-  if (results.length > 0) {
-    setCachedData(results);
-  }
-
-  return results;
+export async function fetchDividendHistory(ticker) {
+  console.warn('Dividend history not available from CSV data');
+  return [];
 }
 
 /**
