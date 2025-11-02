@@ -9,6 +9,8 @@ import {
   getTimeUntilNextUpdate,
   clearCache
 } from './api/yahooFinance.js';
+import { initPaymentMatrix } from './paymentMatrix.js';
+import { initDCACalculator } from './dcaCalculator.js';
 
 // Global state
 let stocksData = [];
@@ -55,8 +57,13 @@ function setupEventListeners() {
     }
   });
 
-  // Clear API key button (not needed for Cloudflare Worker solution)
-  document.getElementById('clear-api-key-btn').style.display = 'none';
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab');
+      switchTab(tab);
+    });
+  });
 
   // Retry button
   document.getElementById('retry-btn')?.addEventListener('click', () => {
@@ -84,6 +91,36 @@ function setupEventListeners() {
 function toggleTheme() {
   currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', currentTheme);
+}
+
+/**
+ * Switch between tabs
+ */
+function switchTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+    content.style.display = 'none';
+  });
+
+  const activeContent = document.getElementById(`${tabName}-content`);
+  activeContent.classList.add('active');
+  activeContent.style.display = 'block';
+
+  // Load tab-specific data
+  if (tabName === 'payments' && !window.paymentMatrixLoaded) {
+    initPaymentMatrix(stocksData);
+    window.paymentMatrixLoaded = true;
+  } else if (tabName === 'calculator' && !window.dcaCalculatorLoaded) {
+    initDCACalculator();
+    window.dcaCalculatorLoaded = true;
+  }
 }
 
 /**
@@ -170,7 +207,6 @@ function updateCacheTimer() {
  */
 function showCacheControls() {
   document.getElementById('clear-cache-btn').style.display = 'block';
-  document.getElementById('clear-api-key-btn').style.display = 'block';
 }
 
 /**
@@ -466,7 +502,8 @@ function updateLastUpdated() {
  */
 function showLoading() {
   document.getElementById('loading').style.display = 'flex';
-  document.getElementById('main-content').style.display = 'none';
+  document.getElementById('tab-navigation').style.display = 'none';
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
   document.getElementById('error').style.display = 'none';
 }
 
@@ -475,8 +512,10 @@ function showLoading() {
  */
 function showMainContent() {
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('main-content').style.display = 'block';
+  document.getElementById('tab-navigation').style.display = 'block';
+  document.getElementById('portfolio-content').style.display = 'block';
   document.getElementById('error').style.display = 'none';
+  updateLastUpdated();
 }
 
 /**
@@ -484,7 +523,8 @@ function showMainContent() {
  */
 function showError(message) {
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('main-content').style.display = 'none';
+  document.getElementById('tab-navigation').style.display = 'none';
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
   document.getElementById('error').style.display = 'flex';
   document.getElementById('error-message').textContent = message;
 }

@@ -86,6 +86,35 @@ export function clearCache() {
 }
 
 /**
+ * Parse a CSV line respecting quoted fields
+ * @param {string} line - CSV line
+ * @returns {string[]} Parsed values
+ */
+function parseCSVLine(line) {
+  const values = [];
+  let currentValue = '';
+  let insideQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === ',' && !insideQuotes) {
+      values.push(currentValue.trim());
+      currentValue = '';
+    } else {
+      currentValue += char;
+    }
+  }
+
+  // Add the last value
+  values.push(currentValue.trim());
+
+  return values;
+}
+
+/**
  * Parse CSV text to array of objects
  * @param {string} csv - CSV text
  * @returns {Object[]} Parsed data
@@ -108,12 +137,12 @@ function parseCSV(csv) {
     throw new Error('Could not find CSV header row');
   }
 
-  const headers = lines[headerIndex].split(',').map(h => h.trim().replace(/"/g, ''));
+  const headers = parseCSVLine(lines[headerIndex]);
   console.log('📋 CSV Headers:', headers);
 
   const data = [];
   for (let i = headerIndex + 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+    const values = parseCSVLine(lines[i]);
 
     // Skip empty rows (rows with no meaningful data)
     if (values.filter(v => v).length === 0) continue;
@@ -181,12 +210,11 @@ export async function fetchStocksBatched(tickers = [], batchSize = 50, retries =
     }));
 
     // Filter out invalid entries (must have ticker and price)
-    // Also filter out sector summary rows that appear at the end
+    // Skip rows where Ticker is empty (sector summary rows at end)
     const validData = mappedData.filter(stock =>
       stock.ticker &&
       stock.ticker.length > 0 &&
-      stock.price > 0 &&
-      !stock.name.includes('Sector') // Filter out summary rows
+      stock.price > 0
     );
 
     console.log(`✅ Mapped to ${validData.length} valid stocks`);
