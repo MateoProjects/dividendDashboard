@@ -13,8 +13,20 @@
         <!-- Header -->
         <header class="header">
             <div class="container">
-                <h1><span class="material-symbols-outlined">monitoring</span> Dividend Dashboard</h1>
+                <div class="header-left">
+                    <h1><span class="material-symbols-outlined">monitoring</span> Dividend Dashboard</h1>
+                    <div class="cache-status" id="cache-status" style="display: none;">
+                        <span class="material-symbols-outlined">schedule</span>
+                        <span id="cache-timer">Next update in: --</span>
+                    </div>
+                </div>
                 <div class="header-controls">
+                    <button id="clear-cache-btn" class="btn-icon" title="Force refresh" style="display: none;">
+                        <span class="material-symbols-outlined">sync</span>
+                    </button>
+                    <button id="clear-api-key-btn" class="btn-icon" title="Change API key" style="display: none;">
+                        <span class="material-symbols-outlined">key</span>
+                    </button>
                     <button id="theme-toggle" class="btn-icon" title="Toggle theme">
                         <span class="material-symbols-outlined">dark_mode</span>
                     </button>

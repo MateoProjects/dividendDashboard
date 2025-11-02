@@ -5,7 +5,10 @@ import {
   fetchStocksBatched,
   calculatePortfolioStats,
   formatCurrency,
-  formatPercent
+  formatPercent,
+  getTimeUntilNextUpdate,
+  clearCache,
+  clearApiKey
 } from './api/yahooFinance.js';
 
 // Global state
@@ -14,17 +17,14 @@ let sortColumn = 'yield';
 let sortDirection = 'desc';
 let currentTheme = portfolio.settings.defaultTheme;
 let isUpdating = false;
-
-// Cache configuration
-const CACHE_KEY = 'dividend_dashboard_cache';
-const CACHE_TIMESTAMP_KEY = 'dividend_dashboard_timestamp';
-const CACHE_EXPIRY = 1000 * 60 * 60; // 1 hour
+let timerInterval = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
   initializeTheme();
   setupEventListeners();
   loadPortfolioData();
+  startCacheTimer();
 });
 
 /**
@@ -44,7 +44,23 @@ function setupEventListeners() {
   // Refresh button
   document.getElementById('refresh-btn').addEventListener('click', () => {
     if (!isUpdating) {
-      fetchFreshData(false);
+      loadPortfolioData();
+    }
+  });
+
+  // Clear cache button (force refresh)
+  document.getElementById('clear-cache-btn').addEventListener('click', () => {
+    if (confirm('Force refresh data? This will use one API request.')) {
+      clearCache();
+      location.reload();
+    }
+  });
+
+  // Clear API key button
+  document.getElementById('clear-api-key-btn').addEventListener('click', () => {
+    if (confirm('Clear saved API key? You will be prompted to enter it again.')) {
+      clearApiKey();
+      location.reload();
     }
   });
 
@@ -66,15 +82,6 @@ function setupEventListeners() {
       handleSort(column);
     });
   });
-
-  // Auto-refresh (background updates only)
-  if (portfolio.settings.refreshInterval > 0) {
-    setInterval(() => {
-      if (!isUpdating) {
-        fetchFreshData(true); // Silent background update
-      }
-    }, portfolio.settings.refreshInterval);
-  }
 }
 
 /**
@@ -86,150 +93,90 @@ function toggleTheme() {
 }
 
 /**
- * Load portfolio data with smart caching
+ * Load portfolio data with smart caching (4-hour cache)
  */
 async function loadPortfolioData() {
-  // Try to load from cache first
-  const cachedData = loadFromCache();
-
-  if (cachedData) {
-    // Show cached data immediately
-    stocksData = cachedData;
-    updateDashboard();
-    updateTable();
-    updateCharts();
-    updateLastUpdated(true); // Mark as cached
-    showMainContent();
-
-    // Update in background if cache is older than 5 minutes
-    const cacheAge = Date.now() - getCacheTimestamp();
-    if (cacheAge > 5 * 60 * 1000) {
-      fetchFreshData(true); // Silent background update
-    }
-  } else {
-    // No cache - show loading and fetch
-    showLoading();
-    await fetchFreshData(false);
-  }
-}
-
-/**
- * Fetch fresh data from API
- */
-async function fetchFreshData(silent = false) {
-  if (!silent) {
-    showLoading();
-  } else {
-    showUpdatingIndicator();
-  }
-
-  hideError();
-  isUpdating = true;
+  showLoading();
 
   try {
+    // fetchStocksBatched now handles caching internally
     const data = await fetchStocksBatched(portfolio.tickers);
 
     if (data.length === 0) {
-      throw new Error('No data received from Yahoo Finance');
+      throw new Error('No data received from API');
     }
 
     stocksData = data;
-
-    // Save to cache
-    saveToCache(data);
 
     // Update UI
     updateDashboard();
     updateTable();
     updateCharts();
-    updateLastUpdated(false);
 
-    if (!silent) {
-      showMainContent();
-    } else {
-      hideUpdatingIndicator();
-    }
+    showMainContent();
+    showCacheControls();
+    updateCacheTimer();
+
   } catch (error) {
     console.error('Error loading portfolio:', error);
-
-    if (!silent) {
-      showError('Failed to load portfolio data. Please check your internet connection and try again.');
-    } else {
-      // Silent failure - keep showing cached data
-      console.warn('Background update failed, keeping cached data');
-      hideUpdatingIndicator();
-    }
+    showError(error.message || 'Failed to load portfolio data. Please check your API key and internet connection.');
   } finally {
     isUpdating = false;
   }
 }
 
 /**
- * Save data to localStorage cache
+ * Start cache countdown timer
  */
-function saveToCache(data) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-    localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-  } catch (error) {
-    console.warn('Failed to save to cache:', error);
+function startCacheTimer() {
+  // Update timer every second
+  timerInterval = setInterval(() => {
+    updateCacheTimer();
+  }, 1000);
+}
+
+/**
+ * Update cache timer display
+ */
+function updateCacheTimer() {
+  const timeData = getTimeUntilNextUpdate();
+
+  if (!timeData) {
+    // No cache or expired - hide timer
+    document.getElementById('cache-status').style.display = 'none';
+    return;
+  }
+
+  // Show timer
+  document.getElementById('cache-status').style.display = 'flex';
+
+  const { hours, minutes, seconds } = timeData;
+
+  // Format timer string
+  let timerText = 'Next update in: ';
+  if (hours > 0) {
+    timerText += `${hours}h ${minutes}m`;
+  } else if (minutes > 0) {
+    timerText += `${minutes}m ${seconds}s`;
+  } else {
+    timerText += `${seconds}s`;
+  }
+
+  document.getElementById('cache-timer').textContent = timerText;
+
+  // Auto-refresh when cache expires
+  if (hours === 0 && minutes === 0 && seconds === 0) {
+    console.log('⏰ Cache expired, reloading...');
+    location.reload();
   }
 }
 
 /**
- * Load data from localStorage cache
+ * Show cache control buttons
  */
-function loadFromCache() {
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    const timestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-
-    if (!cached || !timestamp) {
-      return null;
-    }
-
-    const age = Date.now() - parseInt(timestamp);
-
-    // Cache expired after 1 hour
-    if (age > CACHE_EXPIRY) {
-      return null;
-    }
-
-    return JSON.parse(cached);
-  } catch (error) {
-    console.warn('Failed to load from cache:', error);
-    return null;
-  }
-}
-
-/**
- * Get cache timestamp
- */
-function getCacheTimestamp() {
-  try {
-    const timestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-    return timestamp ? parseInt(timestamp) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Show updating indicator
- */
-function showUpdatingIndicator() {
-  const refreshBtn = document.getElementById('refresh-btn');
-  refreshBtn.classList.add('updating');
-  refreshBtn.style.animation = 'spin 1s linear infinite';
-}
-
-/**
- * Hide updating indicator
- */
-function hideUpdatingIndicator() {
-  const refreshBtn = document.getElementById('refresh-btn');
-  refreshBtn.classList.remove('updating');
-  refreshBtn.style.animation = '';
+function showCacheControls() {
+  document.getElementById('clear-cache-btn').style.display = 'block';
+  document.getElementById('clear-api-key-btn').style.display = 'block';
 }
 
 /**
@@ -507,9 +454,8 @@ function updateYieldChart() {
 /**
  * Update last updated timestamp
  */
-function updateLastUpdated(fromCache = false) {
-  const timestamp = fromCache ? getCacheTimestamp() : Date.now();
-  const date = new Date(timestamp);
+function updateLastUpdated() {
+  const date = new Date();
   const formatted = date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -518,8 +464,7 @@ function updateLastUpdated(fromCache = false) {
     minute: '2-digit'
   });
 
-  const cacheIndicator = fromCache ? ' (cached)' : '';
-  document.getElementById('last-update').textContent = formatted + cacheIndicator;
+  document.getElementById('last-update').textContent = formatted;
 }
 
 /**
