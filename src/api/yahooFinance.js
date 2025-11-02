@@ -2,12 +2,12 @@
 // Uses yahoo-finance2 library which handles Yahoo authentication
 // Deploy to Vercel (100% FREE)
 
-// Vercel API endpoint (will be set after deployment)
+// Vercel API endpoint
 // For local development: http://localhost:3000/api/stocks
-// For production: https://YOUR-PROJECT.vercel.app/api/stocks
+// For production: https://dividend-dashboard-psi.vercel.app/api/stocks
 const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://localhost:3000/api/stocks'
-  : 'https://dividend-dashboard.vercel.app/api/stocks'; // Update after deploying to Vercel
+  : 'https://dividend-dashboard-psi.vercel.app/api/stocks';
 
 // Cache configuration
 const CACHE_KEY = 'yahoo_stock_cache';
