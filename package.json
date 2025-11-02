@@ -1,0 +1,12 @@
+{
+  "name": "dividend-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Dividend Dashboard with Yahoo Finance integration",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "yahoo-finance2": "^2.11.3"
+  }
+}

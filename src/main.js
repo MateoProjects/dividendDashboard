@@ -7,8 +7,7 @@ import {
   formatCurrency,
   formatPercent,
   getTimeUntilNextUpdate,
-  clearCache,
-  clearApiKey
+  clearCache
 } from './api/yahooFinance.js';
 
 // Global state
@@ -56,13 +55,8 @@ function setupEventListeners() {
     }
   });
 
-  // Clear API key button
-  document.getElementById('clear-api-key-btn').addEventListener('click', () => {
-    if (confirm('Clear saved API key? You will be prompted to enter it again.')) {
-      clearApiKey();
-      location.reload();
-    }
-  });
+  // Clear API key button (not needed for Cloudflare Worker solution)
+  document.getElementById('clear-api-key-btn').style.display = 'none';
 
   // Retry button
   document.getElementById('retry-btn')?.addEventListener('click', () => {

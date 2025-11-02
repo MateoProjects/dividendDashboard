@@ -1,49 +1,23 @@
-// 🌐 Financial Modeling Prep API Integration
-// Reliable API with CORS enabled - no proxy needed!
+// 🌐 Yahoo Finance API Integration via Vercel Serverless Function
+// Uses yahoo-finance2 library which handles Yahoo authentication
+// Deploy to Vercel (100% FREE)
 
-const FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3';
+// Vercel API endpoint (will be set after deployment)
+// For local development: http://localhost:3000/api/stocks
+// For production: https://YOUR-PROJECT.vercel.app/api/stocks
+const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:3000/api/stocks'
+  : 'https://dividend-dashboard.vercel.app/api/stocks'; // Update after deploying to Vercel
 
 // Cache configuration
-const CACHE_KEY = 'fmp_stock_cache';
-const API_KEY_STORAGE = 'fmp_api_key';
+const CACHE_KEY = 'yahoo_stock_cache';
 const CACHE_DURATION = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
 
 /**
- * Get API key from localStorage or prompt user
- * @returns {string|null} API key or null if user cancels
+ * Check if API is configured
  */
-function getApiKey() {
-  // Try to get from localStorage first
-  let apiKey = localStorage.getItem(API_KEY_STORAGE);
-
-  if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-    // Prompt user for API key
-    apiKey = prompt(
-      '🔑 Please enter your Financial Modeling Prep API key:\n\n' +
-      '• Get it FREE at: https://site.financialmodelingprep.com/developer/docs/\n' +
-      '• 250 requests/day included\n' +
-      '• Your key will be saved locally (not shared)\n\n' +
-      'Enter your API key:'
-    );
-
-    if (apiKey && apiKey.trim().length > 0) {
-      localStorage.setItem(API_KEY_STORAGE, apiKey.trim());
-      console.log('✅ API key saved successfully!');
-    } else {
-      console.error('❌ No API key provided');
-      return null;
-    }
-  }
-
-  return apiKey;
-}
-
-/**
- * Clear saved API key (useful if key is invalid)
- */
-export function clearApiKey() {
-  localStorage.removeItem(API_KEY_STORAGE);
-  console.log('🗑️ API key cleared. You will be prompted on next request.');
+function isApiConfigured() {
+  return API_URL && API_URL.length > 0;
 }
 
 /**
@@ -123,7 +97,40 @@ export function clearCache() {
 }
 
 /**
- * Fetch stock quote data from Financial Modeling Prep API
+ * Fetch data via Vercel API
+ * @param {string[]} symbols - Array of stock symbols
+ * @returns {Promise<Object>} Response data
+ */
+async function fetchViaApi(symbols) {
+  if (!isApiConfigured()) {
+    throw new Error(
+      '❌ API not configured!\n\n' +
+      'Please deploy to Vercel first (see VERCEL_SETUP.md)'
+    );
+  }
+
+  const symbolsParam = symbols.join(',');
+  const apiUrl = `${API_URL}?symbols=${encodeURIComponent(symbolsParam)}`;
+
+  console.log(`🔄 Fetching via Vercel API...`);
+
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    }
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`API request failed! status: ${response.status}, ${errorData.message || ''}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch stock quote data from Yahoo Finance via Vercel API
  * @param {string[]} tickers - Array of stock tickers
  * @param {boolean} forceRefresh - Force refresh even if cache is valid
  * @returns {Promise<Object[]>} Array of stock data
@@ -137,57 +144,32 @@ export async function fetchStockQuotes(tickers, forceRefresh = false) {
     }
   }
 
-  // Get API key
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('API Key required. Please provide your Financial Modeling Prep API key.');
-  }
-
-  const symbols = tickers.join(',');
-  const url = `${FMP_BASE_URL}/quote/${symbols}?apikey=${apiKey}`;
-
   try {
-    console.log(`🔄 Fetching ${tickers.length} stocks from FMP API...`);
+    console.log(`🔄 Fetching ${tickers.length} stocks from Yahoo Finance...`);
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      }
-    });
+    const data = await fetchViaApi(tickers);
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        // Invalid API key - clear it so user can enter new one
-        clearApiKey();
-        throw new Error('Invalid API key. Please enter a valid key on next page load.');
-      }
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (!data.quoteResponse || !data.quoteResponse.result) {
+      throw new Error('Invalid response format from Yahoo Finance');
     }
 
-    const data = await response.json();
+    console.log(`✅ Successfully fetched ${data.quoteResponse.result.length} stocks`);
 
-    if (!Array.isArray(data)) {
-      throw new Error('Invalid response format from Financial Modeling Prep');
-    }
-
-    console.log(`✅ Successfully fetched ${data.length} stocks`);
-
-    // Map FMP data to our format
-    const mappedData = data.map(stock => ({
+    // Map Yahoo Finance data to our format
+    const mappedData = data.quoteResponse.result.map(stock => ({
       ticker: stock.symbol || '',
-      name: stock.name || stock.symbol || '',
-      price: stock.price || 0,
-      currency: 'USD', // FMP uses USD by default
-      dividend: stock.annualDividend || 0,
-      dividendYield: stock.annualDividend && stock.price ? stock.annualDividend / stock.price : 0,
+      name: stock.longName || stock.shortName || stock.symbol || '',
+      price: stock.regularMarketPrice || 0,
+      currency: stock.currency || 'USD',
+      dividend: stock.trailingAnnualDividendRate || 0,
+      dividendYield: stock.trailingAnnualDividendYield || 0,
       sector: stock.sector || 'Unknown',
       industry: stock.industry || 'Unknown',
       marketCap: stock.marketCap || 0,
-      exDividendDate: stock.exDividendDate ? new Date(stock.exDividendDate) : null,
-      dividendDate: null, // Not available in basic quote
-      change: stock.change || 0,
-      changePercent: stock.changesPercentage ? stock.changesPercentage / 100 : 0
+      exDividendDate: stock.exDividendDate ? new Date(stock.exDividendDate * 1000) : null,
+      dividendDate: stock.dividendDate ? new Date(stock.dividendDate * 1000) : null,
+      change: stock.regularMarketChange || 0,
+      changePercent: stock.regularMarketChangePercent || 0
     }));
 
     // Cache the results
@@ -202,58 +184,25 @@ export async function fetchStockQuotes(tickers, forceRefresh = false) {
 }
 
 /**
- * Fetch historical dividend data from Financial Modeling Prep API
+ * Fetch historical dividend data
+ * Note: Not implemented yet for Vercel API
  * @param {string} ticker - Stock ticker
  * @returns {Promise<Object[]>} Array of dividend history
  */
 export async function fetchDividendHistory(ticker) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.error('❌ API Key not configured!');
-    return [];
-  }
-
-  const url = `${FMP_BASE_URL}/historical-price-full/stock_dividend/${ticker}?apikey=${apiKey}`;
-
-  try {
-    console.log(`🔄 Fetching dividend history for ${ticker}...`);
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (!data.historical || !Array.isArray(data.historical)) {
-      console.warn(`No dividend history found for ${ticker}`);
-      return [];
-    }
-
-    console.log(`✅ Found ${data.historical.length} dividend payments for ${ticker}`);
-
-    return data.historical.map(div => ({
-      date: new Date(div.date),
-      amount: div.dividend || div.adjustedDividend || 0
-    })).sort((a, b) => b.date - a.date);
-
-  } catch (error) {
-    console.error(`❌ Failed to fetch dividend history for ${ticker}:`, error.message);
-    return [];
-  }
+  console.warn('Dividend history not yet implemented for Vercel API');
+  return [];
 }
 
 /**
  * Batch fetch with retry logic and caching
- * Note: FMP free tier allows comma-separated symbols in a single request
  * @param {string[]} tickers - Array of stock tickers
- * @param {number} batchSize - Size of each batch (FMP supports multiple symbols)
+ * @param {number} batchSize - Size of each batch
  * @param {number} retries - Number of retries on failure
  * @param {boolean} forceRefresh - Force refresh even if cache is valid
  * @returns {Promise<Object[]>} Combined stock data
  */
-export async function fetchStocksBatched(tickers, batchSize = 10, retries = 3, forceRefresh = false) {
+export async function fetchStocksBatched(tickers, batchSize = 50, retries = 3, forceRefresh = false) {
   // Check cache first (unless force refresh)
   if (!forceRefresh) {
     const cached = getCachedData();
@@ -262,15 +211,13 @@ export async function fetchStocksBatched(tickers, batchSize = 10, retries = 3, f
     }
   }
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.error('❌ API Key not configured!');
-    return [];
+  if (!isApiConfigured()) {
+    throw new Error('API not configured. Please deploy to Vercel first.');
   }
 
   const batches = [];
 
-  // Split tickers into smaller batches to avoid URL length limits
+  // Split tickers into batches
   for (let i = 0; i < tickers.length; i += batchSize) {
     batches.push(tickers.slice(i, i + batchSize));
   }
@@ -292,9 +239,9 @@ export async function fetchStocksBatched(tickers, batchSize = 10, retries = 3, f
         results.push(...data);
         success = true;
 
-        // Small delay between batches to respect rate limits
+        // Small delay between batches to be nice to Yahoo
         if (i < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
         attempts++;
