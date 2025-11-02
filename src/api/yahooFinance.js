@@ -91,16 +91,21 @@ export function clearCache() {
  * @returns {Object[]} Parsed data
  */
 function parseCSV(csv) {
-  const lines = csv.trim().split('\n').filter(line => line.trim());
+  const lines = csv.trim().split('\n');
 
-  // Try to find the header row (should have "Ticker" or multiple columns)
-  let headerIndex = 0;
-  for (let i = 0; i < Math.min(5, lines.length); i++) {
-    const cols = lines[i].split(',');
-    if (cols.length > 3) { // Header should have multiple columns
+  // Find the header row by looking for "Name" or "Ticker" column
+  let headerIndex = -1;
+  for (let i = 0; i < Math.min(10, lines.length); i++) {
+    const line = lines[i];
+    if (line.includes('Name') || line.includes('Ticker')) {
       headerIndex = i;
+      console.log(`✅ Found header row at line ${i + 1}`);
       break;
     }
+  }
+
+  if (headerIndex === -1) {
+    throw new Error('Could not find CSV header row');
   }
 
   const headers = lines[headerIndex].split(',').map(h => h.trim().replace(/"/g, ''));
@@ -110,8 +115,11 @@ function parseCSV(csv) {
   for (let i = headerIndex + 1; i < lines.length; i++) {
     const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
 
-    // Skip empty rows
+    // Skip empty rows (rows with no meaningful data)
     if (values.filter(v => v).length === 0) continue;
+
+    // Skip rows that are just commas
+    if (values.every(v => !v)) continue;
 
     const obj = {};
     headers.forEach((header, index) => {
@@ -121,6 +129,7 @@ function parseCSV(csv) {
     data.push(obj);
   }
 
+  console.log(`📊 Parsed ${data.length} total rows from CSV`);
   return data;
 }
 
