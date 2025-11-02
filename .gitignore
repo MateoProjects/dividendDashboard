@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Build
+dist/
+build/
+
+# Original Excel file (optional - uncomment if you don't want to commit it)
+# *.xlsx
